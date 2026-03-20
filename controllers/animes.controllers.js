@@ -2,16 +2,12 @@ const animeflv = require("animeflv-api");
 const cloudscraper = require("cloudscraper");
 const cheerio = require("cheerio");
 
-/**-----------------------------------------------
- * |  Obtener últimos animes
- -----------------------------------------------*/
 const getAnimes = async (req, res) => {
   try {
     const data = await animeflv.searchAnimesByFilter({ statuses: ["En emisión"] });
     const animesList = data.data || data || [];
 
     let animes = animesList.map((anime) => {
-      // Nos aseguramos de tener siempre un ID válido (slug) para que no falle el click
       const safeId = anime.id || anime.slug || (anime.title ? anime.title.toLowerCase().replace(/[^a-z0-9]+/g, '-') : "");
       
       return {
@@ -32,15 +28,12 @@ const getAnimes = async (req, res) => {
   }
 };
 
-/**-----------------------------------------------
- * |  Obtener detalles del anime (CORREGIDO)
- -----------------------------------------------*/
+
 const animeDetails = async (req, res) => {
   try {
     const { anime } = req.params;
     console.log(`Buscando detalles de: ${anime}...`);
     
-    // Hacemos el scraping nosotros mismos para evitar el error de índice de la librería
     const url = `https://www3.animeflv.net/anime/${anime}`;
     const html = await cloudscraper({
         uri: url,
@@ -53,14 +46,14 @@ const animeDetails = async (req, res) => {
     
     const $ = cheerio.load(html);
 
-    // Extraemos la información de la página HTML
+
     const title = $('h1.Title').text() || anime;
     const description = $('div.Description p').text() || "Sinopsis no disponible.";
     const status = $('aside p.AnmStts span').text() || "Finalizado";
     
-    // Extraemos la imagen de la portada
+
     let img = $('div.AnimeCover div.Image figure img').attr('src') || $('div.Image img').attr('src') || "";
-    // AnimeFLV a veces devuelve rutas relativas (ej. /uploads/animes/covers/1.jpg)
+
     if (img && img.startsWith('/')) {
         img = `https://www3.animeflv.net${img}`;
     }
@@ -70,7 +63,7 @@ const animeDetails = async (req, res) => {
         genres.push($(el).text());
     });
 
-    // Buscamos dinámicamente el script que tiene los episodios sin importar su posición
+
     let episodeList = [];
     $('script').each((i, el) => {
         const scriptContent = $(el).html();
@@ -79,7 +72,7 @@ const animeDetails = async (req, res) => {
             if (match && match[1]) {
                 try {
                     const episodesArray = JSON.parse(match[1]);
-                    // Mapeamos para obtener la lista visual de episodios
+              
                     episodeList = episodesArray.map(ep => `Episodio ${ep[0]}`);
                 } catch (e) {
                     console.error("❌ Error al parsear episodios:", e.message);
@@ -87,8 +80,6 @@ const animeDetails = async (req, res) => {
             }
         }
     });
-
-    // Si no logramos sacar título ni episodios, probablemente el slug estaba mal
     if (!title && episodeList.length === 0) {
       return res.status(404).json({ message: `No hay detalles para ${anime}` });
     }
@@ -98,7 +89,7 @@ const animeDetails = async (req, res) => {
       genres: genres,
       information: [status, ...episodeList],
       description: description,
-      img: img // Pasamos la imagen al frontend
+      img: img 
     }];
 
     console.log("✅ Detalles extraídos exitosamente.");
@@ -107,7 +98,6 @@ const animeDetails = async (req, res) => {
   } catch (error) {
     console.error("❌ Error en animeDetails:", error.message);
     
-    // Manejar el caso donde Cloudscraper devuelve un 404 porque la URL del anime no existe
     if (error.statusCode === 404) {
        return res.status(404).json({ message: `El anime '${req.params.anime}' no existe en AnimeFLV.` });
     }
@@ -116,14 +106,11 @@ const animeDetails = async (req, res) => {
   }
 };
 
-/**-----------------------------------------------
- * |  Obtener enlaces de reproducción (CORREGIDO MANUALMENTE)
- -----------------------------------------------*/
+
 const seeAnime = async (req, res) => {
   try {
     const { anime, episode } = req.params;
     
-    // AnimeFLV usa la ruta /ver/nombre-del-anime-episodio
     const episodeId = `${anime}-${episode}`;
     const url = `https://www3.animeflv.net/ver/${episodeId}`;
 
@@ -139,7 +126,6 @@ const seeAnime = async (req, res) => {
     const $ = cheerio.load(html);
     let servers = [];
 
-    // Buscamos el script que contiene la variable "videos" con los servidores
     $('script').each((i, el) => {
         const scriptContent = $(el).html();
         if (scriptContent && scriptContent.includes('var videos = {')) {
@@ -147,7 +133,6 @@ const seeAnime = async (req, res) => {
             if (match && match[1]) {
                 try {
                     const videosJson = JSON.parse(match[1]);
-                    // Extraemos los videos subtitulados (SUB)
                     if (videosJson.SUB) {
                         servers = videosJson.SUB;
                     }
@@ -162,11 +147,11 @@ const seeAnime = async (req, res) => {
       return res.status(404).json({ message: `No se encontraron enlaces para el episodio ${episodeId}.` });
     }
 
-    // Limpiamos los enlaces para mandar la URL directa al frontend
+
     let links = servers.map((server) => {
       let videoUrl = server.code || server.url;
       
-      // Si AnimeFLV devuelve un <iframe> en lugar del enlace puro, extraemos el 'src'
+ 
       if (videoUrl && videoUrl.includes('<iframe')) {
           const srcMatch = videoUrl.match(/src="([^"]+)"/);
           if (srcMatch && srcMatch[1]) {
@@ -192,9 +177,7 @@ const seeAnime = async (req, res) => {
   }
 };
 
-/**-----------------------------------------------
- * |  Buscar anime por palabra clave
- -----------------------------------------------*/
+
 const searchAnime = async (req, res) => {
   try {
     const query = req.query.q || req.params.word || req.params.id || "naruto";
@@ -204,7 +187,6 @@ const searchAnime = async (req, res) => {
     const animesList = data.data || data || [];
 
     let results = animesList.map((anime) => {
-      // Nos aseguramos de generar el slug correcto
       const safeId = anime.id || anime.slug || (anime.title ? anime.title.toLowerCase().replace(/[^a-z0-9]+/g, '-') : "");
       
       return {
@@ -231,7 +213,6 @@ const getAnimesByGenre = async (req, res) => {
     const { genre } = req.params;
     console.log(`Buscando por género: ${genre}`);
     
-    // Usamos el filtro de animeflv-api
     const data = await animeflv.searchAnimesByFilter({ genres: [genre] });
     const animesList = data.data || data || [];
 
